@@ -1,0 +1,7 @@
+{
+  "id": "feishu-permission",
+  "name": "Feishu Permission Management",
+  "description": "Grant, list, and revoke permissions on Feishu documents",
+  "version": "1.0.0",
+  "configSchema": { "type": "object", "properties": {}, "additionalProperties": false }
+}

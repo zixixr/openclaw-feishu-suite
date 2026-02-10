@@ -1,0 +1,7 @@
+{
+  "id": "feishu-calendar",
+  "name": "Feishu Calendar Management",
+  "description": "Create, list, update calendar events, check free/busy status",
+  "version": "1.0.0",
+  "configSchema": { "type": "object", "properties": {}, "additionalProperties": false }
+}

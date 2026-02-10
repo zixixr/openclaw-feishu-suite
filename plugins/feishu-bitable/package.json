@@ -1,0 +1,11 @@
+{
+  "name": "@openclaw-custom/feishu-bitable",
+  "version": "1.0.0",
+  "description": "Enhanced Feishu Bitable tools (persistent custom plugin)",
+  "type": "module",
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
+}

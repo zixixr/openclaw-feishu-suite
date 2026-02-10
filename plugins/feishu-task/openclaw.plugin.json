@@ -1,0 +1,7 @@
+{
+  "id": "feishu-task",
+  "name": "Feishu Task Management",
+  "description": "Create, list, update, and complete tasks",
+  "version": "1.0.0",
+  "configSchema": { "type": "object", "properties": {}, "additionalProperties": false }
+}

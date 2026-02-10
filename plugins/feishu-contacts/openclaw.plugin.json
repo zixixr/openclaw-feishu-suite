@@ -1,0 +1,7 @@
+{
+  "id": "feishu-contacts",
+  "name": "Feishu Contacts Directory",
+  "description": "Look up users by email/phone, get user profiles, search contacts",
+  "version": "1.0.0",
+  "configSchema": { "type": "object", "properties": {}, "additionalProperties": false }
+}

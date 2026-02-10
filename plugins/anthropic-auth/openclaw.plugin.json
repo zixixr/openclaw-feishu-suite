@@ -1,0 +1,9 @@
+{
+  "id": "anthropic-auth",
+  "providers": ["anthropic"],
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
+}

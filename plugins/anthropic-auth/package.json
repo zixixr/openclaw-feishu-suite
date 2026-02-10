@@ -1,0 +1,11 @@
+{
+  "name": "@openclaw/anthropic-auth",
+  "version": "2026.2.4",
+  "description": "OpenClaw Anthropic OAuth provider plugin for Claude Pro/Max subscriptions",
+  "type": "module",
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
+}

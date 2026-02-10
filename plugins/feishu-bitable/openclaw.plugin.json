@@ -1,0 +1,11 @@
+{
+  "id": "feishu-bitable",
+  "name": "Feishu Bitable Enhanced",
+  "description": "Comprehensive Feishu Bitable tools - search, batch ops, field/view management",
+  "version": "1.0.0",
+  "configSchema": {
+    "type": "object",
+    "properties": {},
+    "additionalProperties": false
+  }
+}

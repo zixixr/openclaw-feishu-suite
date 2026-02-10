@@ -1,0 +1,7 @@
+{
+  "id": "feishu-messaging",
+  "name": "Feishu Messaging",
+  "description": "Send messages, cards, list chats and members",
+  "version": "1.0.0",
+  "configSchema": { "type": "object", "properties": {}, "additionalProperties": false }
+}

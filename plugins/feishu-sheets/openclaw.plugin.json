@@ -1,0 +1,7 @@
+{
+  "id": "feishu-sheets",
+  "name": "Feishu Sheets (Spreadsheet)",
+  "description": "Read/write spreadsheet cells, ranges, append rows, set dimensions",
+  "version": "1.0.0",
+  "configSchema": { "type": "object", "properties": {}, "additionalProperties": false }
+}

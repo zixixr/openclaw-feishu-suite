@@ -1,0 +1,7 @@
+{
+  "name": "@openclaw-custom/feishu-doc-enhanced",
+  "version": "1.0.0",
+  "openclaw": {
+    "extensions": ["index.ts"]
+  }
+}

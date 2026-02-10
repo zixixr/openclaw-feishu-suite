@@ -1,0 +1,6 @@
+{
+  "name": "@openclaw-custom/feishu-contacts",
+  "version": "1.0.0",
+  "type": "module",
+  "openclaw": { "extensions": ["./index.ts"] }
+}
