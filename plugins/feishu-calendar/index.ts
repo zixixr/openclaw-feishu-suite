@@ -38,6 +38,26 @@ function resolveCredentials(config: any) {
   return null;
 }
 
+// ============ Helpers ============
+
+async function resolvePrimaryCalendarId(client: any): Promise<string> {
+  const res = await client.calendar.calendar.list({ params: { page_size: 50 } });
+  if (res.code !== 0) throw new Error(`Cannot list calendars: ${res.msg} (${res.code})`);
+  const list = res.data?.calendar_list ?? [];
+  // Prefer "primary" type, then "owner" role, then first available
+  const primary = list.find((c: any) => c.type === "primary");
+  if (primary) return primary.calendar_id;
+  const owned = list.find((c: any) => c.role === "owner");
+  if (owned) return owned.calendar_id;
+  if (list[0]) return list[0].calendar_id;
+  throw new Error("No calendars found for this app. The app may need calendar:calendar:readonly scope.");
+}
+
+async function ensureCalendarId(client: any, calendarId?: string): Promise<string> {
+  if (calendarId && calendarId !== "primary") return calendarId;
+  return resolvePrimaryCalendarId(client);
+}
+
 // ============ Functions ============
 
 async function listCalendars(client: any, p: any) {
@@ -47,48 +67,53 @@ async function listCalendars(client: any, p: any) {
 }
 
 async function listEvents(client: any, p: any) {
-  const res = await client.calendar.calendarEvent.list({ path: { calendar_id: p.calendar_id }, params: { start_time: p.start_time, end_time: p.end_time, page_size: p.page_size ?? 50, ...(p.page_token && { page_token: p.page_token }) } });
+  const calId = await ensureCalendarId(client, p.calendar_id);
+  const res = await client.calendar.calendarEvent.list({ path: { calendar_id: calId }, params: { start_time: p.start_time, end_time: p.end_time, page_size: p.page_size ?? 50, ...(p.page_token && { page_token: p.page_token }) } });
   if (res.code !== 0) throw new Error(`${res.msg} (${res.code})`);
   return { events: (res.data?.items ?? []).map((e: any) => ({ event_id: e.event_id, summary: e.summary, description: e.description, start_time: e.start_time, end_time: e.end_time, status: e.status, location: e.location?.name, organizer: e.organizer })), has_more: res.data?.has_more ?? false, page_token: res.data?.page_token };
 }
 
 async function getEvent(client: any, p: any) {
-  const res = await client.calendar.calendarEvent.get({ path: { calendar_id: p.calendar_id, event_id: p.event_id } });
+  const calId = await ensureCalendarId(client, p.calendar_id);
+  const res = await client.calendar.calendarEvent.get({ path: { calendar_id: calId, event_id: p.event_id } });
   if (res.code !== 0) throw new Error(`${res.msg} (${res.code})`);
   return { event: res.data?.event };
 }
 
 async function createEvent(client: any, p: any) {
+  const calId = await ensureCalendarId(client, p.calendar_id);
   const st = p.is_all_day ? { date: p.start_time } : { timestamp: p.start_time };
   const et = p.is_all_day ? { date: p.end_time } : { timestamp: p.end_time };
   const data: any = { summary: p.summary, start_time: st, end_time: et, free_busy_status: "busy" };
   if (p.description) data.description = p.description;
   if (p.location) data.location = { name: p.location };
   if (p.reminders?.length) data.reminders = p.reminders.map((m: number) => ({ minutes: m }));
-  const res = await client.calendar.calendarEvent.create({ path: { calendar_id: p.calendar_id }, data });
+  const res = await client.calendar.calendarEvent.create({ path: { calendar_id: calId }, data });
   if (res.code !== 0) throw new Error(`${res.msg} (${res.code})`);
   const event = res.data?.event;
   if (p.attendee_open_ids?.length && event?.event_id) {
-    const aRes = await client.calendar.calendarEventAttendee.create({ path: { calendar_id: p.calendar_id, event_id: event.event_id }, params: { user_id_type: "open_id" }, data: { attendees: p.attendee_open_ids.map((id: string) => ({ type: "user", user_id: id })) } });
+    const aRes = await client.calendar.calendarEventAttendee.create({ path: { calendar_id: calId, event_id: event.event_id }, params: { user_id_type: "open_id" }, data: { attendees: p.attendee_open_ids.map((id: string) => ({ type: "user", user_id: id })) } });
     if (aRes.code !== 0) return { event, attendee_warning: `Event created but attendees failed: ${aRes.msg}` };
   }
   return { event, attendees_added: p.attendee_open_ids?.length ?? 0 };
 }
 
 async function updateEvent(client: any, p: any) {
+  const calId = await ensureCalendarId(client, p.calendar_id);
   const data: any = {};
   if (p.summary) data.summary = p.summary;
   if (p.description) data.description = p.description;
   if (p.start_time) data.start_time = { timestamp: p.start_time };
   if (p.end_time) data.end_time = { timestamp: p.end_time };
   if (p.location) data.location = { name: p.location };
-  const res = await client.calendar.calendarEvent.patch({ path: { calendar_id: p.calendar_id, event_id: p.event_id }, data });
+  const res = await client.calendar.calendarEvent.patch({ path: { calendar_id: calId, event_id: p.event_id }, data });
   if (res.code !== 0) throw new Error(`${res.msg} (${res.code})`);
   return { event: res.data?.event };
 }
 
 async function deleteEvent(client: any, p: any) {
-  const res = await client.calendar.calendarEvent.delete({ path: { calendar_id: p.calendar_id, event_id: p.event_id } });
+  const calId = await ensureCalendarId(client, p.calendar_id);
+  const res = await client.calendar.calendarEvent.delete({ path: { calendar_id: calId, event_id: p.event_id } });
   if (res.code !== 0) throw new Error(`${res.msg} (${res.code})`);
   return { deleted: true, event_id: p.event_id };
 }
@@ -115,13 +140,14 @@ async function dispatch(client: any, action: string, p: any): Promise<any> {
 }
 
 const DESCRIPTION = `Feishu Calendar operations. Pass "action" and "params".
+IMPORTANT: Events are created on the bot's calendar. You MUST pass attendee_open_ids with the user's open_id so the event appears on their calendar.
 Actions:
 • list_calendars: {page_size?, page_token?}
-• list_events: {calendar_id, start_time, end_time, page_size?, page_token?} — times are Unix seconds. Use "primary" for bot's calendar
-• get_event: {calendar_id, event_id}
-• create_event: {calendar_id, summary, start_time, end_time, description?, is_all_day?, attendee_open_ids?, location?, reminders?}
-• update_event: {calendar_id, event_id, summary?, description?, start_time?, end_time?, location?}
-• delete_event: {calendar_id, event_id}
+• list_events: {calendar_id?, start_time, end_time, page_size?, page_token?} — times are Unix seconds
+• get_event: {calendar_id?, event_id}
+• create_event: {summary, start_time, end_time, attendee_open_ids, description?, is_all_day?, location?, reminders?} — MUST include attendee_open_ids with the requesting user's open_id. Times are Unix seconds. Reminders are minutes before event (e.g. [15])
+• update_event: {event_id, summary?, description?, start_time?, end_time?, location?, calendar_id?}
+• delete_event: {event_id, calendar_id?}
 • freebusy: {time_min, time_max, user_open_id} — Check user availability`;
 
 const plugin = {

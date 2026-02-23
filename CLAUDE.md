@@ -121,7 +121,7 @@ Adding/modifying plugins only requires gateway restart, NOT Docker rebuild.
 ### Current custom plugins (dispatcher pattern — 1 tool per plugin, multiple actions)
 | Plugin | Source (git) | VM Location | Tools | Actions | Purpose |
 |--------|-------------|-------------|-------|---------|---------|
-| feishu-bitable | `plugins/feishu-bitable/` | `~/.openclaw/extensions/feishu-bitable/` | 1 | 21 | Bitable CRUD, search, batch ops, fields, views, app/table creation, attachment copy |
+| feishu-bitable | `plugins/feishu-bitable/` | `~/.openclaw/extensions/feishu-bitable/` | 1 | 22 | Bitable CRUD, search, batch ops, fields, views, app/table creation, attachment copy/upload |
 | feishu-calendar | `plugins/feishu-calendar/` | `~/.openclaw/extensions/feishu-calendar/` | 1 | 7 | Calendar events CRUD, free/busy check, attendee management |
 | feishu-sheets | `plugins/feishu-sheets/` | `~/.openclaw/extensions/feishu-sheets/` | 1 | 6 | Spreadsheet read/write cells, append rows, set column widths |
 | feishu-messaging | `plugins/feishu-messaging/` | `~/.openclaw/extensions/feishu-messaging/` | 1 | 5 | Send messages/cards, reply, list chats and members |
@@ -133,14 +133,24 @@ Adding/modifying plugins only requires gateway restart, NOT Docker rebuild.
 
 **Total tools**: 8 custom + ~4 built-in = ~12 (down from ~49 before consolidation)
 
-### Deploy plugins to a new VM
+### Deploy plugins + patches to VM
 ```bash
-# From project root, upload all plugin files to VM
-for p in feishu-bitable feishu-permission feishu-contacts feishu-messaging feishu-calendar feishu-task feishu-sheets feishu-doc-enhanced anthropic-auth; do
-  scp -r plugins/$p/* azureuser@20.194.30.206:~/.openclaw/extensions/$p/
-done
-# Then restart gateway (docker stop + rm + run)
+# One-command deploy (plugins + patches + restart):
+./deploy.sh
+
+# Or selectively:
+./deploy.sh plugins   # upload plugins only
+./deploy.sh patches   # apply container patches only
+./deploy.sh restart   # just restart gateway
 ```
+
+### Container Patches (`patches/`)
+Patches modify bundled code inside the Docker container. They are **lost on container recreation**
+(`docker run`) but survive `docker restart`. Always re-run `./deploy.sh patches` after recreating the container.
+
+| Patch | Target | Purpose |
+|-------|--------|---------|
+| `bot-media-path.py` | `/app/extensions/feishu/src/bot.ts` | Append inbound media file paths to message body (fixes Media Understanding suppressing paths) |
 
 ## Lessons Learned
 - `agents.defaults.reasoning` is NOT a valid config key in OpenClaw 2026.2.4
@@ -170,3 +180,5 @@ done
 - Anthropic OAuth redirect URI in pi-ai is `console.anthropic.com` but actual redirect goes to `platform.claude.com`; use original `console.anthropic.com` in token exchange
 - Anthropic OAuth scopes: `org:create_api_key user:profile user:inference` (no `user:inference` = no model access)
 - OAuth plugin `providers` array in `openclaw.plugin.json` tells OpenClaw which provider this plugin registers
+- Media Understanding processes inbound images → generates description + multimodal content → **suppresses `[media attached: /path]` note** → model can SEE image but doesn't know file path; fixed with `patches/bot-media-path.py`
+- Container patches (`patches/*.py`) survive `docker restart` but are **lost on `docker run`** (container recreation); always re-run `./deploy.sh patches` after recreating

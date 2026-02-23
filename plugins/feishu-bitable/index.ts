@@ -272,6 +272,22 @@ async function uploadFromBuffer(client: any, appToken: string, fileName: string,
   return token;
 }
 
+async function uploadAttachment(client: any, appToken: string, tableId: string, recordId: string, fieldName: string, filePath: string, fileName?: string): Promise<any> {
+  const fs = appRequire("fs");
+  const path = appRequire("path");
+  if (!fs.existsSync(filePath)) throw new Error(`File not found: ${filePath}`);
+  const buffer = fs.readFileSync(filePath);
+  const name = fileName || path.basename(filePath);
+  const fileToken = await uploadFromBuffer(client, appToken, name, buffer);
+  // Get existing attachments to append (not overwrite)
+  const recRes = await client.bitable.appTableRecord.get({ path: { app_token: appToken, table_id: tableId, record_id: recordId } });
+  const existing: any[] = (recRes.code === 0 && Array.isArray(recRes.data?.record?.fields?.[fieldName])) ? recRes.data.record.fields[fieldName] : [];
+  const newAttachments = [...existing, { file_token: fileToken }];
+  const updateRes = await client.bitable.appTableRecord.update({ path: { app_token: appToken, table_id: tableId, record_id: recordId }, data: { fields: { [fieldName]: newAttachments } } });
+  if (updateRes.code !== 0) throw new Error(updateRes.msg);
+  return { uploaded: true, file_token: fileToken, file_name: name, record_id: recordId, field_name: fieldName, total_attachments: newAttachments.length };
+}
+
 async function batchCopyAttachments(client: any, srcAppToken: string, srcTableId: string, dstAppToken: string, dstTableId: string, fieldName: string, matchField?: string) {
   const srcFieldsRes = await client.bitable.appTableField.list({ path: { app_token: srcAppToken, table_id: srcTableId } });
   if (srcFieldsRes.code !== 0) throw new Error(`List source fields: ${srcFieldsRes.msg}`);
@@ -359,7 +375,8 @@ async function dispatch(client: any, action: string, p: any): Promise<any> {
     case "create_table": return createTable(client, p.app_token, p.name, p.fields, p.default_view_name);
     case "list_tables": return listTables(client, p.app_token, p.page_size, p.page_token);
     case "copy_attachments": return batchCopyAttachments(client, p.src_app_token, p.src_table_id, p.dst_app_token, p.dst_table_id, p.field_name, p.match_field);
-    default: throw new Error(`Unknown action: ${action}. Valid: get_meta, list_records, search, create_record, update_record, delete_record, batch_create, batch_update, batch_delete, list_fields, create_field, update_field, delete_field, list_views, create_view, update_view, delete_view, create_app, create_table, list_tables, copy_attachments`);
+    case "upload_attachment": return uploadAttachment(client, p.app_token, p.table_id, p.record_id, p.field_name, p.file_path, p.file_name);
+    default: throw new Error(`Unknown action: ${action}. Valid: get_meta, list_records, search, create_record, update_record, delete_record, batch_create, batch_update, batch_delete, list_fields, create_field, update_field, delete_field, list_views, create_view, update_view, delete_view, create_app, create_table, list_tables, copy_attachments, upload_attachment`);
   }
 }
 
@@ -387,7 +404,8 @@ Actions:
 • create_app: {name, folder_token?} — Create new bitable
 • create_table: {app_token, name, fields?, default_view_name?}
 • list_tables: {app_token, page_size?, page_token?}
-• copy_attachments: {src_app_token, src_table_id, dst_app_token, dst_table_id, field_name, match_field?} — Copy attachments between tables`;
+• copy_attachments: {src_app_token, src_table_id, dst_app_token, dst_table_id, field_name, match_field?} — Copy attachments between tables
+• upload_attachment: {app_token, table_id, record_id, field_name, file_path, file_name?} — Upload a local file (e.g. from MediaPath) to a record's attachment field`;
 
 const plugin = {
   id: "feishu-bitable",
