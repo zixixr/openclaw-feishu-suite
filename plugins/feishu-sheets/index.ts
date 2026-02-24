@@ -77,6 +77,66 @@ async function setDimension(client: any, p: any) {
   return { success: true, dimension: p.dimension, range: `${p.start_index}-${p.end_index}`, size: p.fixed_size };
 }
 
+// ============ Auto-fit column widths ============
+
+/** Estimate display width of a string (CJK chars count as 2, others as 1). */
+function estimateWidth(text: string): number {
+  let w = 0;
+  for (const ch of String(text)) {
+    w += /[\u2E80-\u9FFF\uF900-\uFAFF\uFE30-\uFE4F\uFF00-\uFFEF\uAC00-\uD7AF]/.test(ch) ? 2 : 1;
+  }
+  return w;
+}
+
+async function autoFitColumns(client: any, p: any) {
+  const PX_PER_CHAR = 8;
+  const PADDING = 24;
+  const MIN_COL = 50;
+  const MAX_COL = 400;
+
+  // 1. Get sheet info
+  const sheetsRes = await client.sheets.spreadsheetSheet.query({ path: { spreadsheet_token: p.spreadsheet_token } });
+  if (sheetsRes.code !== 0) throw new Error(`List sheets: ${sheetsRes.msg} (${sheetsRes.code})`);
+  const sheets = sheetsRes.data?.sheets ?? [];
+  const sheet = p.sheet_id
+    ? sheets.find((s: any) => s.sheet_id === p.sheet_id)
+    : sheets[0];
+  if (!sheet) throw new Error("Sheet not found");
+  const sheetId = sheet.sheet_id;
+  const colCount = sheet.grid_properties?.column_count ?? 10;
+  const rowCount = Math.min(sheet.grid_properties?.row_count ?? 50, 100); // scan first 100 rows max
+
+  // 2. Read data
+  const range = `${sheetId}!A1:${String.fromCharCode(64 + Math.min(colCount, 26))}${rowCount}`;
+  const readRes = await client.request({ method: "GET", url: `/open-apis/sheets/v2/spreadsheets/${p.spreadsheet_token}/values/${encodeURIComponent(range)}`, params: { valueRenderOption: "ToString" } });
+  if (readRes.code !== 0) throw new Error(`Read range: ${readRes.msg} (${readRes.code})`);
+  const rows = readRes.data?.valueRange?.values ?? [];
+
+  // 3. Calculate max width per column
+  const actualCols = Math.min(colCount, 26);
+  const colMaxWidth: number[] = Array(actualCols).fill(0);
+  for (const row of rows) {
+    if (!Array.isArray(row)) continue;
+    for (let c = 0; c < actualCols; c++) {
+      const val = row[c];
+      if (val === null || val === undefined || val === "") continue;
+      const w = estimateWidth(String(val)) * PX_PER_CHAR + PADDING;
+      if (w > colMaxWidth[c]) colMaxWidth[c] = w;
+    }
+  }
+
+  // 4. Clamp and apply
+  const results: { column: number; width: number }[] = [];
+  for (let c = 0; c < actualCols; c++) {
+    const width = Math.max(MIN_COL, Math.min(MAX_COL, colMaxWidth[c] || MIN_COL));
+    const res = await client.request({ method: "PUT", url: `/open-apis/sheets/v2/spreadsheets/${p.spreadsheet_token}/dimension_range`, data: { dimension: { sheetId, majorDimension: "COLUMNS", startIndex: c + 1, endIndex: c + 1 }, dimensionProperties: { visible: true, fixedSize: width } } });
+    if (res.code !== 0) throw new Error(`Set col ${c + 1} width: ${res.msg} (${res.code})`);
+    results.push({ column: c + 1, width });
+  }
+
+  return { auto_fit: true, spreadsheet_token: p.spreadsheet_token, sheet_id: sheetId, columns: results };
+}
+
 // ============ Dispatcher ============
 
 async function dispatch(client: any, action: string, p: any): Promise<any> {
@@ -87,7 +147,8 @@ async function dispatch(client: any, action: string, p: any): Promise<any> {
     case "write_range": return writeRange(client, p);
     case "append": return appendRows(client, p);
     case "set_dimension": return setDimension(client, p);
-    default: throw new Error(`Unknown action: ${action}. Valid: get_meta, list_sheets, read_range, write_range, append, set_dimension`);
+    case "auto_fit": return autoFitColumns(client, p);
+    default: throw new Error(`Unknown action: ${action}. Valid: get_meta, list_sheets, read_range, write_range, append, set_dimension, auto_fit`);
   }
 }
 
@@ -98,7 +159,8 @@ Actions:
 • read_range: {spreadsheet_token, range, render_option?} — Read cells. range: "Sheet1!A1:C10". render_option: ToString|FormattedValue|UnformattedValue
 • write_range: {spreadsheet_token, range, values} — Write cells. values: [[row1col1,row1col2],[row2col1,row2col2]]
 • append: {spreadsheet_token, range, values} — Append rows after last data row
-• set_dimension: {spreadsheet_token, sheet_id, dimension, start_index, end_index, fixed_size} — Set column width/row height. dimension: COLUMNS|ROWS, indices 1-based`;
+• set_dimension: {spreadsheet_token, sheet_id, dimension, start_index, end_index, fixed_size} — Set column width/row height. dimension: COLUMNS|ROWS, indices 1-based
+• auto_fit: {spreadsheet_token, sheet_id?} — Auto-fit all column widths based on cell content. Scans first 100 rows`;
 
 const plugin = {
   id: "feishu-sheets",
@@ -115,7 +177,7 @@ const plugin = {
         catch (err) { return json({ error: err instanceof Error ? err.message : String(err) }); }
       },
     }, { name: "feishu_sheets" });
-    api.logger.info?.("feishu-sheets: Registered 1 dispatcher tool (6 actions)");
+    api.logger.info?.("feishu-sheets: Registered 1 dispatcher tool (7 actions)");
   },
 };
 

@@ -10,7 +10,7 @@
 - **OS**: Ubuntu 24.04 LTS
 
 ## OpenClaw Setup
-- **Version**: 2026.2.4
+- **Version**: 2026.2.23
 - **Docker Image**: openclaw:local
 - **Gateway Port**: 18789 (not publicly exposed, use SSH tunnel)
 - **Gateway Token**: 31ab8657fc80a1ab239d4951e540234f6d36b9d7771e79d4a6f7850582fcf292
@@ -128,7 +128,7 @@ Adding/modifying plugins only requires gateway restart, NOT Docker rebuild.
 | feishu-task | `plugins/feishu-task/` | `~/.openclaw/extensions/feishu-task/` | 1 | 5 | Task create/list/update/complete with assignees and due dates |
 | feishu-contacts | `plugins/feishu-contacts/` | `~/.openclaw/extensions/feishu-contacts/` | 1 | 3 | Lookup users by email/phone, get profiles, search directory |
 | feishu-permission | `plugins/feishu-permission/` | `~/.openclaw/extensions/feishu-permission/` | 1 | 3 | Grant/list/revoke doc permissions |
-| feishu-doc-enhanced | `plugins/feishu-doc-enhanced/` | `~/.openclaw/extensions/feishu-doc-enhanced/` | 1 | 3 | Rich doc creation with FULL table support (bypasses built-in filter) |
+| feishu-doc-enhanced | `plugins/feishu-doc-enhanced/` | `~/.openclaw/extensions/feishu-doc-enhanced/` | 1 | 5 | Rich doc creation with FULL table support, list blocks, update table column widths |
 | anthropic-auth | `plugins/anthropic-auth/` | `~/.openclaw/extensions/anthropic-auth/` | 0 | 0 | Anthropic OAuth provider for Claude Pro/Max subscriptions |
 
 **Total tools**: 8 custom + ~4 built-in = ~12 (down from ~49 before consolidation)
@@ -182,3 +182,5 @@ Patches modify bundled code inside the Docker container. They are **lost on cont
 - OAuth plugin `providers` array in `openclaw.plugin.json` tells OpenClaw which provider this plugin registers
 - Media Understanding processes inbound images → generates description + multimodal content → **suppresses `[media attached: /path]` note** → model can SEE image but doesn't know file path; fixed with `patches/bot-media-path.py`
 - Container patches (`patches/*.py`) survive `docker restart` but are **lost on `docker run`** (container recreation); always re-run `./deploy.sh patches` after recreating
+- Feishu docx `documentBlock.patch` update_table_property requires **per-column** updates: `{ column_index: i, column_width: px }`, NOT array. Loop to update all columns
+- OpenClaw 2026.2.23 removed bundled `google-antigravity-auth` plugin; remove from `plugins.entries` in config if upgrading from older versions
