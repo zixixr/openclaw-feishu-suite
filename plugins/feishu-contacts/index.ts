@@ -44,7 +44,35 @@ async function lookupUsers(client: any, p: any) {
   if (!p.emails?.length && !p.mobiles?.length) throw new Error("Provide at least one email or mobile");
   const res = await client.contact.user.batchGetId({ params: { user_id_type: "open_id" }, data: { emails: p.emails ?? [], mobiles: p.mobiles ?? [] } });
   if (res.code !== 0) throw new Error(`${res.msg} (${res.code})`);
-  return { user_list: res.data?.user_list ?? [] };
+  const userList: any[] = res.data?.user_list ?? [];
+
+  // Fallback: batchGetId only matches `email` (personal), not `enterprise_email`.
+  // For unresolved emails, scan user.list to match enterprise_email.
+  const unresolvedEmails = userList.filter((u: any) => u.email && !u.user_id).map((u: any) => u.email as string);
+  if (unresolvedEmails.length > 0) {
+    try {
+      const matched = new Map<string, string>();
+      let pageToken: string | undefined;
+      outer: do {
+        const lr = await client.contact.user.list({ params: { department_id: "0", page_size: 50, user_id_type: "open_id", ...(pageToken && { page_token: pageToken }) } });
+        if (lr.code !== 0) break;
+        for (const u of lr.data?.items ?? []) {
+          const ent = (u.enterprise_email || "").toLowerCase();
+          if (ent && unresolvedEmails.some((e: string) => e.toLowerCase() === ent)) matched.set(ent, u.open_id);
+          if (matched.size >= unresolvedEmails.length) break outer;
+        }
+        pageToken = lr.data?.has_more ? lr.data?.page_token : undefined;
+      } while (pageToken);
+      for (const item of userList) {
+        if (item.email && !item.user_id) {
+          const oid = matched.get(item.email.toLowerCase());
+          if (oid) item.user_id = oid;
+        }
+      }
+    } catch { /* fallback failed silently — return original results */ }
+  }
+
+  return { user_list: userList };
 }
 
 async function getUser(client: any, p: any) {
@@ -52,7 +80,7 @@ async function getUser(client: any, p: any) {
   if (res.code !== 0) throw new Error(`${res.msg} (${res.code})`);
   const u = res.data?.user;
   if (!u) throw new Error("User not found");
-  return { open_id: u.open_id, name: u.name, en_name: u.en_name, email: u.email, mobile: u.mobile, avatar: u.avatar?.avatar_72, department_ids: u.department_ids, job_title: u.job_title, status: u.status };
+  return { open_id: u.open_id, name: u.name, en_name: u.en_name, email: u.email, enterprise_email: u.enterprise_email, mobile: u.mobile, avatar: u.avatar?.avatar_72, department_ids: u.department_ids, job_title: u.job_title, status: u.status };
 }
 
 async function searchUsers(client: any, p: any) {
