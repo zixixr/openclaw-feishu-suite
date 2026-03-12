@@ -89,6 +89,33 @@ async function searchUsers(client: any, p: any) {
   return { users: (res.data?.items ?? []).map((u: any) => ({ open_id: u.open_id, name: u.name, en_name: u.en_name, department: u.department?.name, avatar: u.avatar?.avatar_72 })), has_more: res.data?.has_more ?? false, page_token: res.data?.page_token };
 }
 
+async function findByName(client: any, p: any) {
+  const names: string[] = Array.isArray(p.names) ? p.names : [p.names];
+  if (names.length === 0) throw new Error("Provide at least one name");
+  const lowerNames = names.map((n: string) => n.toLowerCase().trim());
+  const results = new Map<string, any>();
+  let pageToken: string | undefined;
+  let scanned = 0;
+  do {
+    const lr = await client.contact.user.list({ params: { department_id: "0", page_size: 50, user_id_type: "open_id", ...(pageToken && { page_token: pageToken }) } });
+    if (lr.code !== 0) throw new Error(`List users: ${lr.msg} (${lr.code})`);
+    for (const u of lr.data?.items ?? []) {
+      scanned++;
+      const uName = (u.name || "").toLowerCase();
+      const uEn = (u.en_name || "").toLowerCase();
+      for (const target of lowerNames) {
+        if (uName.includes(target) || uEn.includes(target) || target.includes(uName)) {
+          if (!results.has(u.open_id)) {
+            results.set(u.open_id, { open_id: u.open_id, name: u.name, en_name: u.en_name, email: u.email, enterprise_email: u.enterprise_email, mobile: u.mobile, job_title: u.job_title, department_ids: u.department_ids });
+          }
+        }
+      }
+    }
+    pageToken = lr.data?.has_more ? lr.data?.page_token : undefined;
+  } while (pageToken);
+  return { matched: Array.from(results.values()), scanned, query_names: names };
+}
+
 // ============ Dispatcher ============
 
 async function dispatch(client: any, action: string, p: any): Promise<any> {
@@ -96,7 +123,8 @@ async function dispatch(client: any, action: string, p: any): Promise<any> {
     case "lookup": return lookupUsers(client, p);
     case "get_user": return getUser(client, p);
     case "search": return searchUsers(client, p);
-    default: throw new Error(`Unknown action: ${action}. Valid: lookup, get_user, search`);
+    case "find_by_name": return findByName(client, p);
+    default: throw new Error(`Unknown action: ${action}. Valid: lookup, get_user, search, find_by_name`);
   }
 }
 
@@ -104,7 +132,8 @@ const DESCRIPTION = `Feishu Contacts operations. Pass "action" and "params".
 Actions:
 • lookup: {emails?, mobiles?} — Find user open_id by email or phone (max 50 each). Use before granting permissions or assigning tasks
 • get_user: {open_id} — Get user profile (name, email, department, job title)
-• search: {query, page_size?, page_token?} — Search company directory by name/keyword`;
+• search: {query, page_size?, page_token?} — Search company directory by name/keyword (requires user_access_token, may fail with app token)
+• find_by_name: {names} — Find users by Chinese/English name. names: string or string[]. Scans full directory via tenant token. Example: {names: ["张迁迁","李灵菲"]}`;
 
 const plugin = {
   id: "feishu-contacts",
@@ -121,7 +150,7 @@ const plugin = {
         catch (err) { return json({ error: err instanceof Error ? err.message : String(err) }); }
       },
     }, { name: "feishu_contacts" });
-    api.logger.info?.("feishu-contacts: Registered 1 dispatcher tool (3 actions)");
+    api.logger.info?.("feishu-contacts: Registered 1 dispatcher tool (4 actions)");
   },
 };
 
