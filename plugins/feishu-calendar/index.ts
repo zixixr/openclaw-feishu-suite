@@ -84,7 +84,7 @@ async function createEvent(client: any, p: any) {
   const calId = await ensureCalendarId(client, p.calendar_id);
   const st = p.is_all_day ? { date: p.start_time } : { timestamp: p.start_time };
   const et = p.is_all_day ? { date: p.end_time } : { timestamp: p.end_time };
-  const data: any = { summary: p.summary, start_time: st, end_time: et, free_busy_status: "busy" };
+  const data: any = { summary: p.summary, start_time: st, end_time: et, free_busy_status: "busy", attendee_ability: "can_see_others" };
   if (p.description) data.description = p.description;
   if (p.location) data.location = { name: p.location };
   if (p.reminders?.length) data.reminders = p.reminders.map((m: number) => ({ minutes: m }));
