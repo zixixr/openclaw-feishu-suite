@@ -303,6 +303,58 @@ async function autoFitTable(client: any, docId: string, blockId: string, totalWi
   return { auto_fit: true, block_id: blockId, column_width: columnWidth, columns: column_size, rows: row_size };
 }
 
+// ============ Delete empty table rows ============
+
+async function deleteEmptyRows(client: any, docId: string, blockId: string) {
+  // 1. Get table structure
+  const tableRes = await client.docx.documentBlock.get({ path: { document_id: docId, block_id: blockId } });
+  if (tableRes.code !== 0) throw new Error(`Get table failed: ${tableRes.msg} (${tableRes.code})`);
+  const table = tableRes.data?.block?.table;
+  if (!table) throw new Error("Block is not a table");
+  const { row_size, column_size } = table.property;
+  const cells: string[] = table.cells ?? [];
+
+  // 2. Read cell content to determine which rows are empty
+  const emptyRows: number[] = [];
+  for (let r = 0; r < row_size; r++) {
+    let rowEmpty = true;
+    for (let c = 0; c < column_size; c++) {
+      const cellId = cells[r * column_size + c];
+      if (!cellId) continue;
+      try {
+        const cellRes = await client.docx.documentBlockChildren.get({ path: { document_id: docId, block_id: cellId } });
+        const children = cellRes.data?.items ?? [];
+        let cellText = "";
+        for (const child of children) {
+          if (child.text?.elements) cellText += child.text.elements.map((e: any) => e.text_run?.content ?? "").join("");
+        }
+        if (cellText.trim().length > 0) { rowEmpty = false; break; }
+      } catch { /* treat unreadable as empty */ }
+    }
+    if (rowEmpty) emptyRows.push(r);
+  }
+
+  if (emptyRows.length === 0) return { block_id: blockId, rows: row_size, columns: column_size, empty_rows_found: 0, deleted: 0 };
+
+  // 3. Delete empty rows from bottom to top to avoid index shift
+  let deleted = 0;
+  for (let i = emptyRows.length - 1; i >= 0; i--) {
+    const rowIdx = emptyRows[i];
+    const res = await client.docx.documentBlock.patch({
+      path: { document_id: docId, block_id: blockId },
+      data: { delete_table_rows: { row_start_index: rowIdx, row_end_index: rowIdx + 1 } },
+      params: { document_revision_id: -1 },
+    });
+    if (res.code !== 0) {
+      console.error(`Delete row ${rowIdx} failed: ${res.msg} (${res.code})`);
+    } else {
+      deleted++;
+    }
+  }
+
+  return { block_id: blockId, original_rows: row_size, columns: column_size, empty_rows_found: emptyRows.length, empty_row_indices: emptyRows, deleted };
+}
+
 // ============ Dispatcher ============
 
 async function dispatch(client: any, action: string, p: any): Promise<any> {
@@ -326,7 +378,8 @@ async function dispatch(client: any, action: string, p: any): Promise<any> {
     case "list_blocks": return listBlocks(client, p.document_id, p.block_type);
     case "update_table_property": return updateTableProperty(client, p.document_id, p.block_id, p.column_width);
     case "auto_fit_table": return autoFitTable(client, p.document_id, p.block_id, p.total_width);
-    default: throw new Error(`Unknown action: ${action}. Valid: create_rich, write_rich, insert_table, list_blocks, update_table_property, auto_fit_table`);
+    case "delete_empty_rows": return deleteEmptyRows(client, p.document_id, p.block_id);
+    default: throw new Error(`Unknown action: ${action}. Valid: create_rich, write_rich, insert_table, list_blocks, update_table_property, auto_fit_table, delete_empty_rows`);
   }
 }
 
@@ -337,7 +390,8 @@ Actions:
 • insert_table: {document_id, headers, rows, index?} — Insert structured data table. headers: ["Col1","Col2"], rows: [["a","b"],["c","d"]], index: -1 for append
 • list_blocks: {document_id, block_type?} — List blocks in a doc. block_type=31 for tables only. Returns block_id, table column_width, text content
 • update_table_property: {document_id, block_id, column_width} — Set table column widths in px. First use list_blocks to find the table block_id
-• auto_fit_table: {document_id, block_id, total_width?} — Auto-fit table column widths based on cell content. total_width defaults to 680px`;
+• auto_fit_table: {document_id, block_id, total_width?} — Auto-fit table column widths based on cell content. total_width defaults to 680px
+• delete_empty_rows: {document_id, block_id} — Delete all empty rows from a table. First use list_blocks to find the table block_id`;
 
 const plugin = {
   id: "feishu-doc-enhanced",
@@ -354,7 +408,7 @@ const plugin = {
         catch (err) { return json({ error: err instanceof Error ? err.message : String(err) }); }
       },
     }, { name: "feishu_doc_enhanced" });
-    api.logger.info?.("feishu-doc-enhanced: Registered 1 dispatcher tool (6 actions)");
+    api.logger.info?.("feishu-doc-enhanced: Registered 1 dispatcher tool (7 actions)");
   },
 };
 

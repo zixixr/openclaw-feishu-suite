@@ -137,6 +137,91 @@ async function autoFitColumns(client: any, p: any) {
   return { auto_fit: true, spreadsheet_token: p.spreadsheet_token, sheet_id: sheetId, columns: results };
 }
 
+// ============ Delete empty rows ============
+
+async function deleteEmptyRows(client: any, p: any) {
+  // 1. Get sheet info
+  const sheetsRes = await client.sheets.spreadsheetSheet.query({ path: { spreadsheet_token: p.spreadsheet_token } });
+  if (sheetsRes.code !== 0) throw new Error(`List sheets: ${sheetsRes.msg} (${sheetsRes.code})`);
+  const sheets = sheetsRes.data?.sheets ?? [];
+  const targetSheets = p.sheet_id
+    ? sheets.filter((s: any) => s.sheet_id === p.sheet_id)
+    : sheets;
+  if (targetSheets.length === 0) throw new Error("Sheet not found");
+
+  const results: any[] = [];
+  for (const sheet of targetSheets) {
+    const sheetId = sheet.sheet_id;
+    const rowCount = sheet.grid_properties?.row_count ?? 0;
+    const colCount = sheet.grid_properties?.column_count ?? 26;
+    if (rowCount === 0) continue;
+
+    // 2. Read all data
+    const lastCol = colCount <= 26 ? String.fromCharCode(64 + colCount) : "Z";
+    const range = `${sheetId}!A1:${lastCol}${rowCount}`;
+    const readRes = await client.request({ method: "GET", url: `/open-apis/sheets/v2/spreadsheets/${p.spreadsheet_token}/values/${encodeURIComponent(range)}`, params: { valueRenderOption: "ToString" } });
+    if (readRes.code !== 0) throw new Error(`Read ${sheetId}: ${readRes.msg} (${readRes.code})`);
+    const rows = readRes.data?.valueRange?.values ?? [];
+
+    // 3. Find empty rows (1-based indices for API)
+    const emptyRowIndices: number[] = [];
+    for (let r = 0; r < rows.length; r++) {
+      const row = rows[r];
+      const isEmpty = !Array.isArray(row) || row.every((cell: any) => cell === null || cell === undefined || String(cell).trim() === "");
+      if (isEmpty) emptyRowIndices.push(r + 1); // 1-based
+    }
+    // Also mark rows beyond data as empty (grid may have trailing empty rows)
+    for (let r = rows.length + 1; r <= rowCount; r++) {
+      emptyRowIndices.push(r);
+    }
+
+    if (emptyRowIndices.length === 0) {
+      results.push({ sheet_id: sheetId, title: sheet.title, rows: rowCount, empty_rows: 0, deleted: 0 });
+      continue;
+    }
+
+    // 4. Merge consecutive indices into ranges and delete from bottom to top
+    // Must keep at least 1 row
+    const maxDeletable = rowCount - 1;
+    const toDelete = emptyRowIndices.slice(0, maxDeletable);
+    if (toDelete.length === 0) {
+      results.push({ sheet_id: sheetId, title: sheet.title, rows: rowCount, empty_rows: emptyRowIndices.length, deleted: 0, note: "Cannot delete all rows" });
+      continue;
+    }
+
+    // Group consecutive indices into ranges for batch deletion
+    const ranges: { start: number; end: number }[] = [];
+    let i = 0;
+    while (i < toDelete.length) {
+      const start = toDelete[i];
+      let end = start;
+      while (i + 1 < toDelete.length && toDelete[i + 1] === end + 1) { end++; i++; }
+      ranges.push({ start, end });
+      i++;
+    }
+
+    // Delete from bottom to top to avoid index shift
+    let deleted = 0;
+    for (let ri = ranges.length - 1; ri >= 0; ri--) {
+      const { start, end } = ranges[ri];
+      const res = await client.request({
+        method: "DELETE",
+        url: `/open-apis/sheets/v2/spreadsheets/${p.spreadsheet_token}/dimension_range`,
+        data: { dimension: { sheetId, majorDimension: "ROWS", startIndex: start, endIndex: end } },
+      });
+      if (res.code !== 0) {
+        console.error(`Delete rows ${start}-${end} in ${sheetId}: ${res.msg} (${res.code})`);
+      } else {
+        deleted += (end - start + 1);
+      }
+    }
+
+    results.push({ sheet_id: sheetId, title: sheet.title, original_rows: rowCount, empty_rows: toDelete.length, deleted });
+  }
+
+  return { spreadsheet_token: p.spreadsheet_token, sheets: results };
+}
+
 // ============ Dispatcher ============
 
 async function dispatch(client: any, action: string, p: any): Promise<any> {
@@ -148,7 +233,8 @@ async function dispatch(client: any, action: string, p: any): Promise<any> {
     case "append": return appendRows(client, p);
     case "set_dimension": return setDimension(client, p);
     case "auto_fit": return autoFitColumns(client, p);
-    default: throw new Error(`Unknown action: ${action}. Valid: get_meta, list_sheets, read_range, write_range, append, set_dimension, auto_fit`);
+    case "delete_empty_rows": return deleteEmptyRows(client, p);
+    default: throw new Error(`Unknown action: ${action}. Valid: get_meta, list_sheets, read_range, write_range, append, set_dimension, auto_fit, delete_empty_rows`);
   }
 }
 
@@ -160,7 +246,8 @@ Actions:
 • write_range: {spreadsheet_token, range, values} — Write cells. values: [[row1col1,row1col2],[row2col1,row2col2]]
 • append: {spreadsheet_token, range, values} — Append rows after last data row
 • set_dimension: {spreadsheet_token, sheet_id, dimension, start_index, end_index, fixed_size} — Set column width/row height. dimension: COLUMNS|ROWS, indices 1-based
-• auto_fit: {spreadsheet_token, sheet_id?} — Auto-fit all column widths based on cell content. Scans first 100 rows`;
+• auto_fit: {spreadsheet_token, sheet_id?} — Auto-fit all column widths based on cell content. Scans first 100 rows
+• delete_empty_rows: {spreadsheet_token, sheet_id?} — Delete all empty rows from sheet(s). If sheet_id omitted, processes ALL sheets. For embedded sheets in docs, get spreadsheet_token from list_blocks (block_type=30)`;
 
 const plugin = {
   id: "feishu-sheets",
@@ -177,7 +264,7 @@ const plugin = {
         catch (err) { return json({ error: err instanceof Error ? err.message : String(err) }); }
       },
     }, { name: "feishu_sheets" });
-    api.logger.info?.("feishu-sheets: Registered 1 dispatcher tool (7 actions)");
+    api.logger.info?.("feishu-sheets: Registered 1 dispatcher tool (8 actions)");
   },
 };
 
