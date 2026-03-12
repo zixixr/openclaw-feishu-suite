@@ -106,6 +106,7 @@ async function updateEvent(client: any, p: any) {
   if (p.start_time) data.start_time = { timestamp: p.start_time };
   if (p.end_time) data.end_time = { timestamp: p.end_time };
   if (p.location) data.location = { name: p.location };
+  if (p.attendee_ability) data.attendee_ability = p.attendee_ability;
   const res = await client.calendar.calendarEvent.patch({ path: { calendar_id: calId, event_id: p.event_id }, data });
   if (res.code !== 0) throw new Error(`${res.msg} (${res.code})`);
   return { event: res.data?.event };
@@ -146,7 +147,7 @@ Actions:
 • list_events: {calendar_id?, start_time, end_time, page_size?, page_token?} — times are Unix seconds
 • get_event: {calendar_id?, event_id}
 • create_event: {summary, start_time, end_time, attendee_open_ids, description?, is_all_day?, location?, reminders?} — MUST include attendee_open_ids with the requesting user's open_id. Times are Unix seconds. Reminders are minutes before event (e.g. [15])
-• update_event: {event_id, summary?, description?, start_time?, end_time?, location?, calendar_id?}
+• update_event: {event_id, summary?, description?, start_time?, end_time?, location?, attendee_ability?, calendar_id?} — attendee_ability: "can_see_others"|"cannot_see_others"
 • delete_event: {event_id, calendar_id?}
 • freebusy: {time_min, time_max, user_open_id} — Check user availability`;
 
